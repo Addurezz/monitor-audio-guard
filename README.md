@@ -1,27 +1,27 @@
-# Monitor Audio Guard für macOS
+# Monitor Audio Guard for macOS
 
-Das Skript überwacht den Standardausgang für Wiedergabe und Systemtöne. Sobald macOS dafür einen HDMI- oder DisplayPort-Ausgang auswählt, schaltet es auf den zuvor verwendeten anderen Ausgang zurück. Ist dieser nicht verfügbar, bevorzugt es eingebaute Lautsprecher.
+The script watches the default output for audio playback and system sounds. When macOS selects an HDMI or DisplayPort output, the script switches back to the last used non-monitor output. If that output is unavailable, it prefers the built-in speakers.
 
-## Starten
+## Run the script
 
-Öffne ein Terminal im Ordner des Skripts und führe aus:
+Open Terminal in the script's folder and run:
 
 ```bash
 ./monitor-audio-guard.swift
 ```
 
-Das Skript benötigt Swift aus den Xcode Command Line Tools. Die Überwachung läuft im Terminal bis **Ctrl+C**.
+The script requires Swift from the Xcode Command Line Tools. It keeps watching until you press **Ctrl+C**.
 
-| Option | Funktion |
+| Option | What it does |
 | --- | --- |
-| `--list` | Zeigt Audioausgänge und ihren erkannten Verbindungstyp an. |
-| `--once` | Prüft die Ausgänge einmal und beendet sich. |
-| `--exclude "Gerätename"` | Bezieht einen weiteren Ausgang anhand seines exakten Namens ein. Wiederholbar. |
+| `--list` | Lists audio outputs and their detected connection types. |
+| `--once` | Checks the outputs once and exits. |
+| `--exclude "Device Name"` | Avoids an additional output by its exact name. You can repeat this option. |
 
-Mit `--exclude` kannst du etwa einen USB-C-Monitor erfassen, dessen Audiogerät sich als USB-Audio statt DisplayPort oder HDMI meldet. Den Namen zeigt `--list`.
+Use `--exclude` for a USB-C monitor that reports its audio output as USB audio. Run `--list` to find the device name.
 
-## Umfang
+## What it changes
 
-Der Monitor bleibt im macOS-Tonmenü auswählbar. Apps mit eigener Geräteauswahl können ihn weiterhin direkt verwenden. Das Skript ändert ausschließlich die Standardausgänge und lässt den Mikrofoneingang in Ruhe.
+The monitor remains selectable in macOS Sound settings. Apps with their own device selection can still use it directly. The script changes the default outputs for audio playback and system sounds. Microphone settings stay as configured.
 
-Der automatische Rückwechsel wurde mit einem LG 38GN950 über DisplayPort geprüft. Die HDMI-Erkennung nutzt den von Core Audio gemeldeten Verbindungstyp und wurde noch nicht mit einem HDMI-Gerät geprüft.
+Automatic switching was tested with an LG 38GN950 over DisplayPort. HDMI detection uses the connection type reported by Core Audio. It has yet to be tested with an HDMI device.
