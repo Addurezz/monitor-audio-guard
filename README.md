@@ -1,27 +1,38 @@
 # Monitor Audio Guard for macOS
 
-The script watches the default output for audio playback and system sounds. When macOS selects an HDMI or DisplayPort output, the script switches back to the last used non-monitor output. If that output is unavailable, it prefers the built-in speakers.
+Choose a default audio output and keep macOS from routing standard audio or system sounds to a DisplayPort or HDMI monitor. The guard redirects those defaults to your chosen output when it is available.
 
-## Run the script
+## Install
 
-Open Terminal in the script's folder and run:
+1. Download **Monitor-Audio-Guard-macOS.zip** from the [latest GitHub release](https://github.com/Addurezz/monitor-audio-guard/releases/latest).
+2. Unzip it and double-click **Setup.command**.
+3. Choose your speakers, headphones, or other preferred output by number.
 
-```bash
-./monitor-audio-guard.swift
-```
+Setup selects the output immediately. It also uses the same output for system sounds if the device supports them. The guard starts right away and runs each time you sign in. To change the saved output, run **Setup.command** again.
 
-The script requires Swift from the Xcode Command Line Tools. It keeps watching until you press **Ctrl+C**.
+The release contains a ready-to-run binary for Apple silicon and Intel Macs running macOS 15 or later. This build is not notarized by Apple. If macOS blocks the first launch and you trust the download, use **System Settings → Privacy & Security → Open Anyway**. [Apple's instructions](https://support.apple.com/en-us/102445)
+
+## How routing works
+
+The guard redirects audio only when macOS selects a DisplayPort or HDMI output. You can still switch to other speakers or headphones temporarily. If the preferred device is disconnected, the guard tries the most recently used allowed output, then the built-in speakers, then any remaining eligible output.
+
+The monitor remains selectable in macOS Sound settings. Apps with their own device selection can still use it. Microphone settings stay as configured. Automatic switching was tested with an LG 38GN950 over DisplayPort. HDMI recognition uses Core Audio's connection type and has yet to be tested on HDMI hardware.
+
+## Run from source
+
+With the Xcode Command Line Tools installed, run `./setup.sh` for the same interactive setup, or run `./monitor-audio-guard.swift` to watch from Terminal until you press **Ctrl+C**.
 
 | Option | What it does |
 | --- | --- |
-| `--list` | Lists audio outputs and their detected connection types. |
+| `--list` | Shows audio outputs and their detected connection types. |
+| `--outputs` | Lists allowed outputs with their persistent device UIDs. |
+| `--preferred UID` | Prefers this output when redirecting away from a monitor. |
+| `--preferred UID --set-default` | Sets this output immediately and exits. |
 | `--once` | Checks the outputs once and exits. |
-| `--exclude "Device Name"` | Avoids an additional output by its exact name. You can repeat this option. |
+| `--exclude "Device Name"` | Avoids another output by exact name. You can repeat this option. |
 
-Use `--exclude` for a USB-C monitor that reports its audio output as USB audio. Run `--list` to find the device name.
+For a USB-C monitor that reports itself as USB audio, use `--exclude` when running the guard manually. Use `--list` to find its exact name.
 
-## What it changes
+## Uninstall
 
-The monitor remains selectable in macOS Sound settings. Apps with their own device selection can still use it directly. The script changes the default outputs for audio playback and system sounds. Microphone settings stay as configured.
-
-Automatic switching was tested with an LG 38GN950 over DisplayPort. HDMI detection uses the connection type reported by Core Audio. It has yet to be tested with an HDMI device.
+Double-click **Uninstall.command** or run `./setup.sh --uninstall` from the source folder. This removes the background service. The current macOS output stays selected.

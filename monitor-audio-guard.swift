@@ -3,13 +3,16 @@ import CoreAudio
 import Foundation
 
 private let usage = """
-Verwendung:
-  ./monitor-audio-guard.swift [--list] [--once] [--exclude "Gerätename"]
+Usage: monitor-audio-guard [--list | --outputs | --once | --set-default]
+                           [--preferred UID] [--exclude "Device Name"]
 
-Leitet den Standardton und Systemtöne von HDMI- und DisplayPort-Ausgängen um.
---list     Ausgänge und Erkennung anzeigen, ohne etwas umzustellen.
---once     Einmal prüfen und beenden. Ohne Option läuft die Überwachung bis Ctrl+C.
---exclude  Einen weiteren Ausgang per exaktem Namen ausschließen. Mehrfach möglich.
+Keeps the default audio output and system sounds off HDMI and DisplayPort.
+--list         Show detected outputs and whether they are allowed.
+--outputs      List eligible outputs as UID and name, separated by a tab.
+--once         Check once and exit. With no mode flag, watch until Ctrl+C.
+--preferred    Prefer this output UID when redirecting away from a monitor.
+--set-default  Set the preferred output immediately and exit.
+--exclude      Avoid another output by exact name. May be repeated.
 """
 
 private struct GuardError: LocalizedError {
@@ -20,6 +23,9 @@ private struct GuardError: LocalizedError {
 private struct Options {
     var list = false
     var once = false
+    var outputChoices = false
+    var setDefault = false
+    var preferredUID: String?
     var excludedNames: Set<String> = []
 
     init(_ args: [String]) throws {
@@ -28,14 +34,27 @@ private struct Options {
             switch argument {
             case "--list": list = true
             case "--once": once = true
+            case "--outputs": outputChoices = true
+            case "--set-default": setDefault = true
+            case "--preferred":
+                guard let uid = arguments.next(), !uid.isEmpty, !uid.hasPrefix("--") else {
+                    throw GuardError(message: "--preferred requires an output UID.")
+                }
+                preferredUID = uid
             case "--exclude":
                 guard let name = arguments.next(), !name.isEmpty, !name.hasPrefix("--") else {
-                    throw GuardError(message: "--exclude erwartet einen Gerätenamen.")
+                    throw GuardError(message: "--exclude requires a device name.")
                 }
                 excludedNames.insert(name)
             default:
-                throw GuardError(message: "Unbekannte Option: \(argument)\n\(usage)")
+                throw GuardError(message: "Unknown option: \(argument)\n\(usage)")
             }
+        }
+        if [list, once, outputChoices, setDefault].filter({ $0 }).count > 1 {
+            throw GuardError(message: "Choose one run mode.\n\(usage)")
+        }
+        if setDefault && preferredUID == nil {
+            throw GuardError(message: "--set-default requires --preferred UID.")
         }
     }
 }
@@ -76,10 +95,10 @@ private struct Output {
         switch transport {
         case kAudioDeviceTransportTypeDisplayPort: return "DisplayPort"
         case kAudioDeviceTransportTypeHDMI: return "HDMI"
-        case kAudioDeviceTransportTypeBuiltIn: return "Intern"
+        case kAudioDeviceTransportTypeBuiltIn: return "Built-in"
         case kAudioDeviceTransportTypeUSB: return "USB"
         case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE: return "Bluetooth"
-        default: return "Sonstiger Anschluss"
+        default: return "Other connection"
         }
     }
 
@@ -93,11 +112,13 @@ private struct Output {
 private final class AudioGuard {
     private let system = AudioHardwareSystem.shared
     private let excludedNames: Set<String>
+    private let preferredUID: String?
     private var lastAudioUID: String?
     private var lastEffectsUID: String?
 
-    init(excludedNames: Set<String>) {
+    init(excludedNames: Set<String>, preferredUID: String?) {
         self.excludedNames = excludedNames
+        self.preferredUID = preferredUID
     }
 
     private func outputs() throws -> [Output] {
@@ -106,9 +127,32 @@ private final class AudioGuard {
 
     func list() throws {
         for output in try outputs() {
-            let state = output.isExcluded(excludedNames) ? "wird umgangen" : "verwendbar"
+            let state = output.isExcluded(excludedNames) ? "avoided" : "allowed"
             print("\(output.name) [\(output.transportName)] – \(state)")
         }
+    }
+
+    func listOutputChoices() throws {
+        for output in try outputs() where output.canPlayAudio && !output.isExcluded(excludedNames) {
+            let name = output.name.components(separatedBy: .whitespacesAndNewlines.union(.controlCharacters))
+                .filter { !$0.isEmpty }.joined(separator: " ")
+            print("\(output.uid)\t\(name)")
+        }
+    }
+
+    func setPreferredOutput() throws {
+        guard let output = try outputs().first(where: {
+            $0.uid == preferredUID && $0.canPlayAudio && !$0.isExcluded(excludedNames)
+        }) else {
+            throw GuardError(message: "The selected output is unavailable. Reconnect it and try again.")
+        }
+        if try system.defaultOutputDevice?.id != output.device.id {
+            try system.setDefaultOutputDevice(output.device)
+        }
+        if output.canPlayEffects, try system.defaultSoundEffectsDevice?.id != output.device.id {
+            try system.setDefaultSoundEffectsDevice(output.device)
+        }
+        print("Default output: \(output.name)")
     }
 
     private func redirect(current: AudioHardwareDevice?, lastUID: inout String?, candidates: [Output],
@@ -120,10 +164,11 @@ private final class AudioGuard {
         }
 
         let allowed = candidates.filter { !$0.isExcluded(excludedNames) }
-        guard let replacement = allowed.first(where: { $0.uid == lastUID }) ??
+        guard let replacement = allowed.first(where: { $0.uid == preferredUID }) ??
+            allowed.first(where: { $0.uid == lastUID }) ??
             allowed.first(where: { $0.transport == kAudioDeviceTransportTypeBuiltIn }) ??
             allowed.first else {
-            fputs("\(label): Kein alternativer Ausgang verfügbar.\n", stderr)
+            fputs("\(label): No alternative output available.\n", stderr)
             return
         }
         try apply(replacement.device)
@@ -134,10 +179,10 @@ private final class AudioGuard {
     func update() throws {
         let available = try outputs()
         try redirect(current: system.defaultOutputDevice, lastUID: &lastAudioUID,
-                     candidates: available.filter(\.canPlayAudio), label: "Standardton",
+                     candidates: available.filter(\.canPlayAudio), label: "Default audio",
                      apply: system.setDefaultOutputDevice)
         try redirect(current: system.defaultSoundEffectsDevice, lastUID: &lastEffectsUID,
-                     candidates: available.filter(\.canPlayEffects), label: "Systemtöne",
+                     candidates: available.filter(\.canPlayEffects), label: "System sounds",
                      apply: system.setDefaultSoundEffectsDevice)
     }
 
@@ -150,15 +195,15 @@ private final class AudioGuard {
                 do {
                     try update()
                 } catch {
-                    fputs("Audio konnte nicht umgeleitet werden: \(error.localizedDescription)\n", stderr)
+                    fputs("Could not redirect audio: \(error.localizedDescription)\n", stderr)
                 }
             }
             guard status == noErr else {
-                throw GuardError(message: "Core-Audio-Überwachung konnte nicht starten (OSStatus \(status)).")
+                throw GuardError(message: "Could not start Core Audio monitoring (OSStatus \(status)).")
             }
         }
         try update()
-        print("Überwachung aktiv. Zum Beenden Ctrl+C drücken.")
+        print("Monitoring audio outputs. Press Ctrl+C to stop.")
         fflush(stdout)
         dispatchMain()
     }
@@ -171,9 +216,13 @@ do {
         exit(EXIT_SUCCESS)
     }
     let options = try Options(args)
-    let guardProcess = AudioGuard(excludedNames: options.excludedNames)
+    let guardProcess = AudioGuard(excludedNames: options.excludedNames, preferredUID: options.preferredUID)
     if options.list {
         try guardProcess.list()
+    } else if options.outputChoices {
+        try guardProcess.listOutputChoices()
+    } else if options.setDefault {
+        try guardProcess.setPreferredOutput()
     } else if options.once {
         try guardProcess.update()
     } else {
